@@ -42,9 +42,19 @@
             padding: 10px;
             border-radius: 5px;
             background: #f0f8ff;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .calendar-day:hover {
+            background: #e8f4f8;
         }
         .today {
             background: #4299e1;
+            color: white;
+            font-weight: bold;
+        }
+        .selected {
+            background: #38b2ac;
             color: white;
             font-weight: bold;
         }
@@ -62,11 +72,35 @@
             display: flex;
             align-items: center;
             gap: 20px;
+            margin-bottom: 20px;
         }
         .temp {
             font-size: 32px;
             font-weight: bold;
             color: #4299e1;
+        }
+        /* 时段天气样式 */
+        .hourly-weather {
+            display: flex;
+            gap: 15px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+        }
+        .hourly-item {
+            min-width: 80px;
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .hourly-time {
+            font-weight: bold;
+            color: #4a5568;
+        }
+        .hourly-temp {
+            color: #4299e1;
+            margin: 5px 0;
         }
     </style>
 </head>
@@ -88,7 +122,7 @@
 
         <!-- 天气模块 -->
         <div class="weather" id="weather">
-            <h3>实时天气</h3>
+            <h3 id="weather-title">实时天气</h3>
             <div class="weather-info">
                 <div class="temp" id="temp">--℃</div>
                 <div>
@@ -96,10 +130,20 @@
                     <div id="condition">--</div>
                 </div>
             </div>
+
+            <!-- 当天时段天气 -->
+            <div class="hourly-weather" id="hourly-weather">
+                <!-- 时段天气会通过JS动态生成 -->
+            </div>
         </div>
     </div>
 
     <script>
+        // 全局变量：存储城市、天气数据、选中的日期
+        let currentCity = "北京";
+        let weatherData = null;
+        let selectedDate = new Date(); // 默认选中当天
+
         // ========== 日历功能 ==========
         function initCalendar() {
             const now = new Date();
@@ -124,42 +168,135 @@
                 calendarGrid.appendChild(emptyDiv);
             }
 
-            // 填充日期
+            // 填充日期（添加点击事件）
             for (let day = 1; day <= daysInMonth; day++) {
                 const dayDiv = document.createElement("div");
                 dayDiv.className = "calendar-day";
+                dayDiv.dataset.date = `${year}-${month+1}-${day}`; // 存储日期数据
+                dayDiv.textContent = day;
+
+                // 标记今天
                 if (day === today) {
                     dayDiv.classList.add("today");
                 }
-                dayDiv.textContent = day;
+                // 标记选中的日期（默认今天）
+                if (day === selectedDate.getDate() && month === selectedDate.getMonth()) {
+                    dayDiv.classList.add("selected");
+                }
+
+                // 点击日期切换选中状态，并加载对应天气
+                dayDiv.addEventListener("click", function() {
+                    // 移除其他日期的选中样式
+                    document.querySelectorAll(".calendar-day.selected").forEach(el => {
+                        el.classList.remove("selected");
+                    });
+                    // 添加当前选中样式
+                    this.classList.add("selected");
+                    // 更新选中日期
+                    selectedDate = new Date(year, month, day);
+                    // 加载选中日期的天气
+                    loadWeatherByDate(selectedDate);
+                });
+
                 calendarGrid.appendChild(dayDiv);
             }
         }
 
-        // ========== 天气功能（调用免费API） ==========
+        // ========== 天气功能 ==========
+        // 初始化：获取城市 + 加载当天天气
         async function initWeather() {
             try {
                 // 1. 获取用户所在城市（通过IP）
                 const ipRes = await fetch("https://ipapi.co/json/");
                 const ipData = await ipRes.json();
-                const city = ipData.city || "北京";
+                currentCity = ipData.city || "北京";
 
-                // 2. 调用免费天气API（无需申请key）
-                const weatherRes = await fetch(`https://wttr.in/${city}?format=j1`);
-                const weatherData = await weatherRes.json();
-                
-                // 提取天气数据
-                const temp = weatherData.current_condition[0].temp_C; // 温度（摄氏度）
-                const condition = weatherData.current_condition[0].weatherDesc[0].value; // 天气状况
-
-                // 显示天气
-                document.getElementById("city").textContent = `${city} ${condition}`;
-                document.getElementById("temp").textContent = `${temp}℃`;
+                // 2. 加载当天天气
+                loadWeatherByDate(new Date());
             } catch (error) {
-                // 加载失败时的默认提示
-                document.getElementById("city").textContent = "获取天气失败";
-                document.getElementById("temp").textContent = "--℃";
+                console.error("获取城市失败：", error);
+                currentCity = "北京";
+                loadWeatherByDate(new Date());
             }
+        }
+
+        // 根据选中的日期加载天气
+        async function loadWeatherByDate(targetDate) {
+            try {
+                // 格式化日期为YYYYMMDD（适配wttr.in API）
+                const dateStr = targetDate.toISOString().split("T")[0].replace(/-/g, "");
+                // 调用wttr.in API获取指定日期的天气
+                const weatherRes = await fetch(`https://wttr.in/${currentCity}?format=j1&date=${dateStr}`);
+                weatherData = await weatherRes.json();
+
+                // 更新天气标题（显示选中的日期）
+                const dateTitle = targetDate.toLocaleDateString("zh-CN", { year: 'numeric', month: 'long', day: 'numeric' });
+                document.getElementById("weather-title").textContent = `${currentCity} ${dateTitle} 天气`;
+
+                // 提取核心天气数据
+                let weatherInfo;
+                // 如果是今天，显示实时数据；否则显示当天预报
+                const today = new Date().toDateString();
+                if (targetDate.toDateString() === today) {
+                    weatherInfo = weatherData.current_condition[0];
+                } else {
+                    // 找到对应日期的预报数据
+                    const forecastDay = weatherData.weather.find(day => day.date === dateStr);
+                    weatherInfo = {
+                        temp_C: forecastDay?.mintempC || "--",
+                        weatherDesc: [{ value: forecastDay?.weatherDesc[0].value || "--" }]
+                    };
+                }
+
+                // 更新核心天气显示
+                document.getElementById("city").textContent = currentCity;
+                document.getElementById("temp").textContent = `${weatherInfo.temp_C}℃`;
+                document.getElementById("condition").textContent = weatherInfo.weatherDesc[0].value;
+
+                // 加载当天不同时段的天气（仅显示今天）
+                if (targetDate.toDateString() === today) {
+                    loadHourlyWeather();
+                } else {
+                    // 非今天隐藏时段天气
+                    document.getElementById("hourly-weather").innerHTML = "<div>仅显示当天时段天气</div>";
+                }
+            } catch (error) {
+                console.error("加载天气失败：", error);
+                document.getElementById("city").textContent = currentCity;
+                document.getElementById("temp").textContent = "--℃";
+                document.getElementById("condition").textContent = "获取天气失败";
+                document.getElementById("hourly-weather").innerHTML = "";
+            }
+        }
+
+        // 加载当天不同时段的天气
+        function loadHourlyWeather() {
+            const hourlyWeather = document.getElementById("hourly-weather");
+            hourlyWeather.innerHTML = ""; // 清空原有内容
+
+            // 获取当天时段预报数据（每3小时）
+            const hourlyData = weatherData.hourly;
+            // 只显示未来12个时段（36小时）
+            const showHours = hourlyData.slice(0, 12);
+
+            showHours.forEach(item => {
+                const hourlyItem = document.createElement("div");
+                hourlyItem.className = "hourly-item";
+
+                // 格式化时间（如：00:00）
+                const time = item.time.slice(0, 2) + ":00";
+                // 温度和天气状况
+                const temp = item.tempC + "℃";
+                const desc = item.weatherDesc[0].value;
+
+                hourlyItem.innerHTML = `
+                    <div class="hourly-time">${time}</div>
+                    <div class="hourly-temp">${temp}</div>
+                    <div class="hourly-desc">${desc}</div>
+                `;
+
+                hourlyWeather.appendChild(hourlyItem);
+            });
         }
 
         // 初始化页面
